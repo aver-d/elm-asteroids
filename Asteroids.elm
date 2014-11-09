@@ -10,9 +10,22 @@ fl = toFloat
 type Input = { dt:Time }
 
 type Asteroid = {pos: Vec, vel: Vec, radius: Float, points: [Vec]}
-type Game = {state:State, asteroids:[Asteroid]}
+type Game = {state:State, asteroids:[Asteroid], seed: Rand.Seed}
 data State = Play
 
+
+(spaceWidth, spaceHeight) = (600, 300)
+(halfW, halfH) = (spaceWidth // 2, spaceHeight // 2)
+
+
+screenWrapper (w, h) ({pos, radius} as entity) =
+  let (x, y) = pos
+      newX = if abs x > w + radius then negate x else x
+      newY = if abs y > h + radius then negate y else y
+  in
+    { entity | pos <- (newX, newY) }
+
+wrap = screenWrapper (fl halfW / 2, fl halfH / 2)
 
 
 -- Entities
@@ -32,9 +45,10 @@ newAsteroid x y seed =
     ({pos = (x,y), vel = (fl vx, fl vy), radius = radius, points = points}, seed5)
 
 
-stepAsteroid : Float -> Asteroid -> Asteroid
-stepAsteroid dt a =
-  { a | pos <- V.add a.pos (V.mul a.vel dt)}
+
+--moveEntity : Float -> a -> a
+moveEntity dt ent =
+  wrap { ent | pos <- V.add ent.pos (V.mul ent.vel dt)}
 
 
 
@@ -49,25 +63,45 @@ render (w, h) ({state, asteroids} as game) =
 
   let forms = map formAsteroid asteroids
 
-  in collage w h forms
+  in collage halfW halfH forms
       |> color gray
       |> container w h middle
+      -- |> color charcoal
 
 
 
 -- Game
 defaultGame : Game
-defaultGame = {state = Play,
-               asteroids = [fst <| newAsteroid 16 16 <| Rand.newSeed 0]}
+defaultGame = { state = Play
+              , asteroids = []
+              , seed = Rand.newSeed 0 }
+
+initGame numAsteroids =
+  let seed = Rand.newSeed 0
+      (xs, seed2) = Rand.ints -100 100 numAsteroids seed -- change these to actual window size
+      (ys, seed3) = Rand.ints  -50  50 numAsteroids seed2
+
+      (asteroids, seed4) =
+        foldl (\ (x, y) (list, seed) ->
+          let (ast, seed') = newAsteroid x y seed
+          in  (ast::list, seed'))
+        ([], seed3) (zip (map fl xs) (map fl ys))
+  in
+    {defaultGame | asteroids <- asteroids
+                 , seed <- seed4}
+
+
+
+
 
 stepGame: Input -> Game -> Game
 stepGame input game =
   let _ = Debug.watch "game" game
-      _ = Debug.watch "input" input
-      asteroids = map (stepAsteroid input.dt) game.asteroids
+
+      asteroids = map (moveEntity input.dt) game.asteroids
   in {game | asteroids <- asteroids}
 
-gameState = foldp stepGame defaultGame inputAll
+gameState = foldp stepGame (initGame 5) inputAll
 
 
 
