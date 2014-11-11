@@ -58,7 +58,7 @@ wrap = screenWrapper (fl halfW, fl halfH)
 
 
 
--- Entities
+-- Asteroid
 newAsteroid : Float -> Float -> Rand.Seed -> (Asteroid, Rand.Seed)
 newAsteroid x y seed =
   let
@@ -76,11 +76,21 @@ newAsteroid x y seed =
 updateAsteroid dt asteroid =
   asteroid |> movePos dt |> wrap
 
-newShip : Ship
-newShip =
-  { pos = (0,0), vel = (0,0), accel = (0,0), damping = 0.99, maxSpeed = 100
-  , turnSpeed = 2, thrustPower = 300, radius = 20, heading = 0, thrust = False
-  , firePower = 0.25, fireRate = 0.25 }
+
+-- Ship
+defaultShip : Ship
+defaultShip = { pos = (0,0)
+              , vel = (0,0)
+              , accel = (0,0)
+              , damping = 0.99
+              , maxSpeed = 100
+              , turnSpeed = 2
+              , thrustPower = 300
+              , radius = 20
+              , heading = 0
+              , thrust = False
+              , firePower = 0.25
+              , fireRate = 0.25 }
 
 movePos dt ent =
   { ent | pos <- ent.pos `V.add` (dt `V.mul` ent.vel) }
@@ -89,7 +99,8 @@ movePos dt ent =
 shipUpdate {dt, fire, turn, thrust} ship  =
   ship |> shipThrust thrust
        |> shipTurn dt turn
-       |> shipFire dt fire
+       |> shipReload dt
+       |> shipFire fire
        |> shipMove dt
        |> wrap
 
@@ -115,14 +126,19 @@ shipThrust thrust ship =
         let force = V.mul ship.thrustPower (cos ship.heading, sin ship.heading)
         in { ship | accel <- force }
 
-shipFire dt fire ship =
-  if | fire      -> { ship | firePower <- 0 }
-     | otherwise -> { ship | firePower <- min (ship.firePower + dt) ship.fireRate    }
+shipReload dt ship =
+  { ship | firePower <- min (ship.firePower + dt) ship.fireRate }
 
-hasFired ship =
+shipFire fire ship =
+  if | fire && ship.firePower >= ship.fireRate -> { ship | firePower <- 0 }
+     | otherwise -> ship
+
+
+didFire ship =
   ship.firePower == 0
 
 
+-- Bullet
 defaultBullet =
   { pos = (0,0)
   , vel = (0,0)
@@ -151,8 +167,8 @@ isAlive {timeToLive} = timeToLive > 0
 
 
 
-collide p q =
-  V.len (V.sub p.pos q.pos) < (p.radius + q.radius)
+collide a b =
+  V.len (V.sub a.pos b.pos) < (a.radius + b.radius)
 
 -- Render
 formAsteroid : Asteroid -> Form
@@ -162,7 +178,6 @@ formAsteroid a =
      | otherwise ->
         group [ polygon a.points |> (outlined <| solid black)
               , circle a.radius |> outlined (solid darkGreen) ] |> move a.pos
-
 
 formBullet b =
   rect 4 3 |> filled red |> rotate b.heading |> move b.pos
@@ -176,8 +191,6 @@ formShip {pos, radius, heading, thrust} =
       forms = booster r :: booster -r :: body :: [] |> group
   in
     forms |> move pos |> rotate heading
-
-
 
 render : (Int,Int) -> Game -> Element
 render (w, h) game =
@@ -197,7 +210,7 @@ render (w, h) game =
 -- Game
 defaultGame : Game
 defaultGame = { state = Play
-              , ship = newShip
+              , ship = defaultShip
               , asteroids = []
               , bullets = []
               , seed = Rand.newSeed 0 }
@@ -222,6 +235,7 @@ updateGame : Input -> Game -> Game
 updateGame input game =
   let
       dt = input.dt
+      _ = Debug.watch "input.fire" input.fire
 
       shipHit = any (collide game.ship) game.asteroids
       ship = shipUpdate input game.ship
@@ -230,14 +244,17 @@ updateGame input game =
 
       bullets = map (updateBullet dt) game.bullets |> filter isAlive
 
-      bullets' = if | hasFired ship -> newBullet ship :: bullets
-                    | otherwise     -> bullets
+      bullets' = if | didFire ship -> newBullet ship :: bullets
+                    | otherwise -> bullets
 
+
+      --_ = Debug.watch "fireNow" fireNow
       --_ = Debug.watch "ship" ship
+      --_ = Debug.watch "input" input
 
   in {game | asteroids <- asteroids
            , ship <- ship
-           , bullets <- bullets }
+           , bullets <- bullets' }
 
 
 
