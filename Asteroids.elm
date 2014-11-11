@@ -10,10 +10,10 @@ import Util (bigrams, roundTo)
 
 fl = toFloat
 
-type Input = { dt:Time, thrust: Bool, turn: Float }
+debug = True
 
-
-type Asteroid = {pos: Vec, vel: Vec, accel: Vec, radius: Float, points: [Vec]}
+type Input = { dt: Time, fire: Bool, thrust: Bool, turn: Float }
+type Asteroid = {pos: Vec, vel: Vec, radius: Float, points: [Vec]}
 type Ship = { pos: Vec
             , vel: Vec
             , accel: Vec
@@ -23,12 +23,18 @@ type Ship = { pos: Vec
             , thrustPower: Float
             , radius: Float
             , heading: Float
-            , thrust: Bool }
+            , thrust: Bool
+            , firePower: Float
+            , fireRate: Float }
+type Bullet = { pos: Vec
+              , vel: Vec
+              , timeToLive: Float
+              , radius: Float }
 type Game = { state: State
             , ship: Ship
             , asteroids: [Asteroid]
             , seed: Rand.Seed }
-data State = Play
+data State = Play | End
 
 
 (spaceWidth, spaceHeight) = (300, 150)
@@ -62,20 +68,24 @@ newAsteroid x y seed =
     angles = map (\n -> n * 2 *pi) <| map (roundTo 2) <| sort nums
     points = map (\a -> (cos a*radius, sin a*radius)) angles
   in
-    ({pos = (x,y), vel = (fl vx, fl vy), accel=(0,0), radius = radius, points = points}, seed5)
+    ({pos = (x,y), vel = (fl vx, fl vy), radius = radius, points = points}, seed5)
 
 newShip : Ship
 newShip =
-  { pos = (0,0), vel = (0,0), accel = (0,0), damping = 0.98, maxspeed = 100
-  , turnspeed = 2, thrustPower = 300, radius = 20, heading = 0, thrust = False }
+  { pos = (0,0), vel = (0,0), accel = (0,0), damping = 0.99, maxspeed = 100
+  , turnspeed = 2, thrustPower = 300, radius = 20, heading = 0, thrust = False
+  , firePower = 0.25, fireRate = 0.25 }
 
 movePos dt ent =
   wrap { ent | pos <- ent.pos `V.add` (dt `V.mul` ent.vel) }
 
 
-stepShip {dt, turn, thrust} ship  =
-  ship |> shipThrust thrust |> shipTurn dt turn |> shipMove dt |> wrap
-  --ship |> shipTurn dt turn |> shipMove dt |> wrap
+shipUpdate {dt, fire, turn, thrust} ship  =
+  ship |> shipThrust thrust
+       |> shipTurn dt turn
+       |> shipFire dt fire
+       |> shipMove dt
+       |> wrap
 
 
 shipMove dt ship =
@@ -93,27 +103,48 @@ shipTurn dt turn ship =
      | otherwise -> {ship | heading <- ship.heading + (turn * ship.turnspeed * dt) }
 
 
-
-
 shipThrust thrust ship =
-  if | thrust ->
+  if | not thrust -> ship
+     | otherwise ->
         let force = V.mul ship.thrustPower (cos ship.heading, sin ship.heading)
         in { ship | accel <- force }
-     | otherwise -> ship
-  --if | thrust ->
-  --      let force = (cos ship.heading, sin ship.heading) |> V.mul ship.thrustPower
-  --      in {ship | accel <- force }
-  --   | otherwise -> ship
 
---shipFire
+shipFire dt fire ship =
+  if | fire      -> { ship | firePower <- 0 }
+     | otherwise -> { ship | firePower <- min (ship.firePower + dt) ship.fireRate    }
+
+hasFired ship =
+  ship.firePower == 0
+
+
+defaultBullet =
+  { pos = (0,0)
+  , vel = (0,0)
+  , timeToLive = 1
+  , speed = 200
+  , radius = 4 }
+
+newBullet ship =
+  let ((x, y), (vx, vy), h) = (ship.pos, ship.vel, ship.heading)
+
+  in {defaultBullet | pos <- ( x + (cos h) * ship.radius
+                             , y + (sin h) * ship.radius )
+                    , vel <- ( vx + (cos h) * defaultBullet.speed
+                             , vy + (sin h) * defaultBullet.speed ) }
 
 
 
+collide p q =
+  V.len (V.sub p.pos q.pos) < (p.radius + q.radius)
 
 -- Render
 formAsteroid : Asteroid -> Form
-formAsteroid {pos, points} =
-  polygon points |> (outlined <| solid black) |> move pos
+formAsteroid a =
+  if | not debug -> polygon a.points |> (outlined <| solid black) |> move a.pos
+     | otherwise ->
+        group [ polygon a.points |> (outlined <| solid black)
+              , circle a.radius |> outlined (solid darkGreen) ] |> move a.pos
+
 
 
 formShip {pos, radius, heading, thrust} =
@@ -165,11 +196,17 @@ newGame numAsteroids =
 
 
 
-stepGame : Input -> Game -> Game
-stepGame input game =
-  let
-      ship = stepShip input game.ship
+
+updateGame : Input -> Game -> Game
+updateGame input game =
+  let -- _ = if input.fire then Debug.log "fire" input.fire else False
+      --_ = Debug.log "dt" input.dt
+      shipHit = any (collide game.ship) game.asteroids
+      ship = shipUpdate input game.ship
+      _ = if hasFired ship then  Debug.log "fired!" True else False
       asteroids = map (movePos input.dt) game.asteroids
+
+      _ = Debug.watch "ship" ship
 
   in {game | asteroids <- asteroids
            , ship <- ship }
@@ -179,11 +216,12 @@ stepGame input game =
 -- Inputs
 delta = inSeconds <~ fps 60
 inputAll = sampleOn delta (Input <~ delta
-                                  ~ lift (.y >> (==) 1 ) Keyboard.arrows  --thrust
-                                  ~ lift (.x >> negate >> toFloat) Keyboard.arrows) --turn
+                      {- fire -}  ~ Keyboard.space
+                    {- thrust -}  ~ lift (.y >> (==) 1 ) Keyboard.arrows
+                      {- turn -}  ~ lift (.x >> negate >> toFloat) Keyboard.arrows)
 
 
-gameState = foldp stepGame (newGame 10) inputAll
+gameState = foldp updateGame (newGame 5) inputAll
 
 
 main =
