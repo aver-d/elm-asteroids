@@ -20,6 +20,7 @@ type Ship = { pos: Vec
             , damping: Float
             , maxspeed: Float
             , turnspeed: Float
+            , thrustPower: Float
             , radius: Float
             , heading: Float
             , thrust: Bool }
@@ -65,15 +66,16 @@ newAsteroid x y seed =
 
 newShip : Ship
 newShip =
-  { pos = (0,0), vel = (0,0), accel = (0,0), damping = 0.98, maxspeed = 10
-  , turnspeed = 2, radius = 20, heading = 0, thrust = False }
+  { pos = (0,0), vel = (0,0), accel = (0,0), damping = 0.98, maxspeed = 100
+  , turnspeed = 2, thrustPower = 300, radius = 20, heading = 0, thrust = False }
 
 movePos dt ent =
   wrap { ent | pos <- ent.pos `V.add` (dt `V.mul` ent.vel) }
 
 
 stepShip {dt, turn, thrust} ship  =
-  ship shipThrust thrust |> shipTurn dt turn |> shipMove dt
+  ship |> shipThrust thrust |> shipTurn dt turn |> shipMove dt |> wrap
+  --ship |> shipTurn dt turn |> shipMove dt |> wrap
 
 
 shipMove dt ship =
@@ -82,22 +84,26 @@ shipMove dt ship =
               |> V.limit ship.maxspeed
       pos = ship.pos `V.add` (dt `V.mul` vel)
 
-  in  wrap { ship | pos <- pos
-                  , vel <- vel
-                  , accel <- (0,0) }
+  in  { ship | pos <- pos
+             , vel <- vel
+             , accel <- (0,0) }
 
 shipTurn dt turn ship =
-  let heading = if | turn == 0 -> ship.heading
-                   | otherwise -> ship.heading + (turn * ship.turnspeed * dt)
-  in
-    { ship | heading <- heading }
+  if | turn == 0 -> ship
+     | otherwise -> {ship | heading <- ship.heading + (turn * ship.turnspeed * dt) }
+
+
 
 
 shipThrust thrust ship =
   if | thrust ->
-        let force = (cos ship.heading, sin ship.heading) |> V.mul ship.thrustPower
-        in {ship | accel <- force }
+        let force = V.mul ship.thrustPower (cos ship.heading, sin ship.heading)
+        in { ship | accel <- force }
      | otherwise -> ship
+  --if | thrust ->
+  --      let force = (cos ship.heading, sin ship.heading) |> V.mul ship.thrustPower
+  --      in {ship | accel <- force }
+  --   | otherwise -> ship
 
 --shipFire
 
@@ -119,7 +125,6 @@ formShip {pos, radius, heading, thrust} =
       forms = booster r :: booster -r :: body :: [] |> group
   in
     forms |> move pos |> rotate heading
-
 
 
 
@@ -163,7 +168,6 @@ newGame numAsteroids =
 stepGame : Input -> Game -> Game
 stepGame input game =
   let
-       --_ = if not <| turn == 0 then let _ = Debug.log "turn" turn in 1 else 1
       ship = stepShip input game.ship
       asteroids = map (movePos input.dt) game.asteroids
 
@@ -173,7 +177,7 @@ stepGame input game =
 
 
 -- Inputs
-delta = inSeconds <~ fps 30
+delta = inSeconds <~ fps 60
 inputAll = sampleOn delta (Input <~ delta
                                   ~ lift (.y >> (==) 1 ) Keyboard.arrows  --thrust
                                   ~ lift (.x >> negate >> toFloat) Keyboard.arrows) --turn
