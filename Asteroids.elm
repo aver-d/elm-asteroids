@@ -11,14 +11,16 @@ fl = toFloat
 type Input = { dt:Time }
 
 type Asteroid = {pos: Vec, vel: Vec, accel: Vec, radius: Float, points: [Vec]}
-type Spaceship = {pos: Vec, vel: Vec, accel: Vec}
-type Game = {state:State, asteroids:[Asteroid], seed: Rand.Seed}
+type Spaceship = {pos: Vec, vel: Vec, accel: Vec, radius: Float, heading: Float}
+type Game = { state: State
+            , spaceship: Spaceship
+            , asteroids: [Asteroid]
+            , seed: Rand.Seed }
 data State = Play
 
 
 (spaceWidth, spaceHeight) = (300, 150)
 (halfW, halfH) = (spaceWidth // 2, spaceHeight // 2)
-
 
 
 
@@ -51,6 +53,8 @@ newAsteroid x y seed =
     ({pos = (x,y), vel = (fl vx, fl vy), accel=(0,0), radius = radius, points = points}, seed5)
 
 
+newSpaceship =
+  {pos = (0,0), vel = (0,0), accel = (0,0), radius = 8, heading = 0}
 
 --moveEntity : Float -> a -> a
 moveEntity dt ent =
@@ -66,11 +70,18 @@ formAsteroid {pos, points} =
   polygon points |> (outlined <| solid black) |> move pos
 
 
+formSpaceship {pos, radius, heading} =
+  let (x,y) = pos
+      r = radius
+      p = path [(-r/2,r), (r,0), (-r/2,-r)]
+  in
+    path p |> (traced (solid black)) |> move pos |> rotate heading
+
 
 render : (Int,Int) -> Game -> Element
-render (w, h) ({state, asteroids} as game) =
+render (w, h) game =
 
-  let forms = map formAsteroid asteroids
+  let forms = formSpaceship game.spaceship :: (map formAsteroid game.asteroids)
 
   in collage spaceWidth spaceHeight forms
       |> color gray
@@ -81,10 +92,11 @@ render (w, h) ({state, asteroids} as game) =
 -- Game
 defaultGame : Game
 defaultGame = { state = Play
+              , spaceship = newSpaceship
               , asteroids = []
               , seed = Rand.newSeed 0 }
 
-initGame numAsteroids =
+newGame numAsteroids =
   let seed = Rand.newSeed 0
       (xs, seed2) = Rand.ints -halfW halfW numAsteroids seed
       (ys, seed3) = Rand.ints -halfH halfH numAsteroids seed2
@@ -117,7 +129,7 @@ delta = inSeconds <~ fps 30
 inputAll = sampleOn delta (Input <~ delta)
 
 
-gameState = foldp stepGame (initGame 3) inputAll
+gameState = foldp stepGame (newGame 3) inputAll
 
 main =
   --asText <|
