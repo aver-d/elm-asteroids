@@ -10,14 +10,14 @@ fl = toFloat
 
 type Input = { dt:Time }
 
-type Asteroid = {pos: Vec, vel: Vec, radius: Float, points: [Vec]}
+type Asteroid = {pos: Vec, vel: Vec, accel: Vec, radius: Float, points: [Vec]}
+type Spaceship = {pos: Vec, vel: Vec, accel: Vec}
 type Game = {state:State, asteroids:[Asteroid], seed: Rand.Seed}
 data State = Play
 
 
-(spaceWidth, spaceHeight) = (600, 300)
+(spaceWidth, spaceHeight) = (300, 150)
 (halfW, halfH) = (spaceWidth // 2, spaceHeight // 2)
-(quartW, quartH) = (spaceWidth // 4, spaceHeight // 4)
 
 
 
@@ -29,17 +29,9 @@ screenWrapper (w, h) ({pos, radius} as entity) =
   in
     { entity | pos <- (newX, newY) }
 
-wrap = screenWrapper (fl halfW / 2, fl halfH / 2)
+wrap = screenWrapper (fl halfW , fl halfH)
 
 
-fillGaps maxGap (x::xs) =
-  x :: (concatMap (\(a, b) ->
-         let diff = b - a
-         in if | diff <= maxGap -> [b]
-               | otherwise ->
-                 let n = ceiling (diff/maxGap) |> toFloat
-                     multi = diff / n
-                 in map (\i -> a + i * multi) [1..n]) <| bigrams <| x::xs)
 
 
 
@@ -53,20 +45,19 @@ newAsteroid x y seed =
     (npoints, seed4)     = Rand.int 5 10 seed3
     (nums, seed5)        = Rand.floats npoints seed4
 
-    --noGaps = fillGaps -1 <| sort nums
-    noGaps = map (roundTo 2) (sort nums)
-    _ = Debug.log "nums" noGaps
-
-    angles = map (\n -> n * 2 *pi) noGaps
+    angles = map (\n -> n * 2 *pi) <| map (roundTo 2) <| sort nums
     points = map (\a -> (cos a*radius, sin a*radius)) angles
   in
-    ({pos = (x,y), vel = (fl vx, fl vy), radius = radius, points = points}, seed5)
+    ({pos = (x,y), vel = (fl vx, fl vy), accel=(0,0), radius = radius, points = points}, seed5)
 
 
 
 --moveEntity : Float -> a -> a
 moveEntity dt ent =
-  wrap { ent | pos <- V.add ent.pos (V.mul ent.vel dt)}
+  let vel = V.add ent.vel <| V.mul ent.accel dt
+      pos = V.add ent.pos <| V.mul vel dt
+  in  wrap { ent | pos <- pos
+                 , vel <- vel }
 
 
 -- Render
@@ -81,7 +72,7 @@ render (w, h) ({state, asteroids} as game) =
 
   let forms = map formAsteroid asteroids
 
-  in collage halfW halfH forms
+  in collage spaceWidth spaceHeight forms
       |> color gray
       |> container w h topLeft
 
@@ -95,8 +86,8 @@ defaultGame = { state = Play
 
 initGame numAsteroids =
   let seed = Rand.newSeed 0
-      (xs, seed2) = Rand.ints -quartW quartW numAsteroids seed
-      (ys, seed3) = Rand.ints -quartH quartH numAsteroids seed2
+      (xs, seed2) = Rand.ints -halfW halfW numAsteroids seed
+      (ys, seed3) = Rand.ints -halfH halfH numAsteroids seed2
 
       (asteroids, seed4) =
         foldl (\ (x, y) (list, seed) ->
