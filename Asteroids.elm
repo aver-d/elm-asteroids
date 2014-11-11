@@ -18,8 +18,8 @@ type Ship = { pos: Vec
             , vel: Vec
             , accel: Vec
             , damping: Float
-            , maxspeed: Float
-            , turnspeed: Float
+            , maxSpeed: Float
+            , turnSpeed: Float
             , thrustPower: Float
             , radius: Float
             , heading: Float
@@ -28,11 +28,14 @@ type Ship = { pos: Vec
             , fireRate: Float }
 type Bullet = { pos: Vec
               , vel: Vec
-              , timeToLive: Float
-              , radius: Float }
+              , speed: Float -- necessary?
+              , heading: Float
+              , radius: Float
+              , timeToLive: Float }
 type Game = { state: State
             , ship: Ship
             , asteroids: [Asteroid]
+            , bullets: [Bullet]
             , seed: Rand.Seed }
 data State = Play | End
 
@@ -70,14 +73,17 @@ newAsteroid x y seed =
   in
     ({pos = (x,y), vel = (fl vx, fl vy), radius = radius, points = points}, seed5)
 
+updateAsteroid dt asteroid =
+  asteroid |> movePos dt |> wrap
+
 newShip : Ship
 newShip =
-  { pos = (0,0), vel = (0,0), accel = (0,0), damping = 0.99, maxspeed = 100
-  , turnspeed = 2, thrustPower = 300, radius = 20, heading = 0, thrust = False
+  { pos = (0,0), vel = (0,0), accel = (0,0), damping = 0.99, maxSpeed = 100
+  , turnSpeed = 2, thrustPower = 300, radius = 20, heading = 0, thrust = False
   , firePower = 0.25, fireRate = 0.25 }
 
 movePos dt ent =
-  wrap { ent | pos <- ent.pos `V.add` (dt `V.mul` ent.vel) }
+  { ent | pos <- ent.pos `V.add` (dt `V.mul` ent.vel) }
 
 
 shipUpdate {dt, fire, turn, thrust} ship  =
@@ -91,7 +97,7 @@ shipUpdate {dt, fire, turn, thrust} ship  =
 shipMove dt ship =
   let vel = ship.vel `V.add` (dt `V.mul` ship.accel)
               |> V.mul ship.damping
-              |> V.limit ship.maxspeed
+              |> V.limit ship.maxSpeed
       pos = ship.pos `V.add` (dt `V.mul` vel)
 
   in  { ship | pos <- pos
@@ -100,7 +106,7 @@ shipMove dt ship =
 
 shipTurn dt turn ship =
   if | turn == 0 -> ship
-     | otherwise -> {ship | heading <- ship.heading + (turn * ship.turnspeed * dt) }
+     | otherwise -> {ship | heading <- ship.heading + (turn * ship.turnSpeed * dt) }
 
 
 shipThrust thrust ship =
@@ -122,7 +128,8 @@ defaultBullet =
   , vel = (0,0)
   , timeToLive = 1
   , speed = 200
-  , radius = 4 }
+  , radius = 4
+  , heading = 0 }
 
 newBullet ship =
   let ((x, y), (vx, vy), h) = (ship.pos, ship.vel, ship.heading)
@@ -130,7 +137,17 @@ newBullet ship =
   in {defaultBullet | pos <- ( x + (cos h) * ship.radius
                              , y + (sin h) * ship.radius )
                     , vel <- ( vx + (cos h) * defaultBullet.speed
-                             , vy + (sin h) * defaultBullet.speed ) }
+                             , vy + (sin h) * defaultBullet.speed )
+                    , heading <- h }
+
+updateBullet dt bullet =
+  bullet |> sapLife dt |> movePos dt
+
+sapLife dt ent =
+  {ent | timeToLive <- ent.timeToLive - dt }
+
+isAlive {timeToLive} = timeToLive > 0
+
 
 
 
@@ -140,12 +157,15 @@ collide p q =
 -- Render
 formAsteroid : Asteroid -> Form
 formAsteroid a =
+  -- try to do debug outline with all forms
   if | not debug -> polygon a.points |> (outlined <| solid black) |> move a.pos
      | otherwise ->
         group [ polygon a.points |> (outlined <| solid black)
               , circle a.radius |> outlined (solid darkGreen) ] |> move a.pos
 
 
+formBullet b =
+  rect 4 3 |> filled red |> rotate b.heading |> move b.pos
 
 formShip {pos, radius, heading, thrust} =
   let (x,y) = pos
@@ -164,7 +184,9 @@ render (w, h) game =
 
   let ship = formShip game.ship
       asteroids = map formAsteroid game.asteroids
-      forms = ship :: asteroids
+      bullets = map formBullet game.bullets
+      forms = ship :: (asteroids ++ bullets)
+
 
   in collage spaceWidth spaceHeight forms
       |> color gray
@@ -177,6 +199,7 @@ defaultGame : Game
 defaultGame = { state = Play
               , ship = newShip
               , asteroids = []
+              , bullets = []
               , seed = Rand.newSeed 0 }
 
 newGame numAsteroids =
@@ -195,21 +218,26 @@ newGame numAsteroids =
 
 
 
-
-
 updateGame : Input -> Game -> Game
 updateGame input game =
-  let -- _ = if input.fire then Debug.log "fire" input.fire else False
-      --_ = Debug.log "dt" input.dt
+  let
+      dt = input.dt
+
       shipHit = any (collide game.ship) game.asteroids
       ship = shipUpdate input game.ship
-      _ = if hasFired ship then  Debug.log "fired!" True else False
-      asteroids = map (movePos input.dt) game.asteroids
 
-      _ = Debug.watch "ship" ship
+      asteroids = map (updateAsteroid dt) game.asteroids
+
+      bullets = map (updateBullet dt) game.bullets |> filter isAlive
+
+      bullets' = if | hasFired ship -> newBullet ship :: bullets
+                    | otherwise     -> bullets
+
+      --_ = Debug.watch "ship" ship
 
   in {game | asteroids <- asteroids
-           , ship <- ship }
+           , ship <- ship
+           , bullets <- bullets }
 
 
 
