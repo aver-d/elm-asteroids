@@ -5,7 +5,8 @@ import Window
 import Rand
 import Debug
 import Keyboard
-import Util (bigrams, roundTo)
+import Set
+import Util (allPairs, bigrams, roundTo)
 
 
 fl = toFloat
@@ -13,7 +14,7 @@ fl = toFloat
 debug = True
 
 type Input = { dt: Time, fire: Bool, thrust: Bool, turn: Float }
-type Asteroid = {pos: Vec, vel: Vec, radius: Float, points: [Vec]}
+type Asteroid = {id: Int, pos: Vec, vel: Vec, radius: Float, points: [Vec]}
 type Ship = { pos: Vec
             , vel: Vec
             , accel: Vec
@@ -26,7 +27,8 @@ type Ship = { pos: Vec
             , thrust: Bool
             , firePower: Float
             , fireRate: Float }
-type Bullet = { pos: Vec
+type Bullet = { id: Int
+              , pos: Vec
               , vel: Vec
               , speed: Float -- necessary?
               , heading: Float
@@ -36,8 +38,9 @@ type Game = { state: State
             , ship: Ship
             , asteroids: [Asteroid]
             , bullets: [Bullet]
-            , seed: Rand.Seed }
-data State = Play | End
+            , seed: Rand.Seed
+            , nextId: Int }
+data State = Start | Play | End
 
 
 (spaceWidth, spaceHeight) = (300, 150)
@@ -59,8 +62,8 @@ wrap = screenWrapper (fl halfW, fl halfH)
 
 
 -- Asteroid
-newAsteroid : Float -> Float -> Rand.Seed -> (Asteroid, Rand.Seed)
-newAsteroid x y seed =
+newAsteroid : Int -> Float -> Float -> Rand.Seed -> (Asteroid, Rand.Seed)
+newAsteroid id x y seed =
   let
     ((vx::vy::_), seed2) = Rand.ints -10 10 2 seed
     (r, seed3)           = Rand.int 10 20 seed2
@@ -71,7 +74,8 @@ newAsteroid x y seed =
     angles = map (\n -> n * 2 *pi) <| map (roundTo 2) <| sort nums
     points = map (\a -> (cos a*radius, sin a*radius)) angles
   in
-    ({pos = (x,y), vel = (fl vx, fl vy), radius = radius, points = points}, seed5)
+    ({id = id, pos = (x,y), vel = (fl vx, fl vy), radius = radius, points = points},
+      seed5)
 
 updateAsteroid dt asteroid =
   asteroid |> movePos dt |> wrap
@@ -133,28 +137,29 @@ shipFire fire ship =
   if | fire && ship.firePower >= ship.fireRate -> { ship | firePower <- 0 }
      | otherwise -> ship
 
-
 didFire ship =
   ship.firePower == 0
 
 
 -- Bullet
 defaultBullet =
-  { pos = (0,0)
+  { id = 0
+  , pos = (0,0)
   , vel = (0,0)
   , timeToLive = 1
   , speed = 200
   , radius = 4
   , heading = 0 }
 
-newBullet ship =
+newBullet id ship =
   let ((x, y), (vx, vy), h) = (ship.pos, ship.vel, ship.heading)
 
   in {defaultBullet | pos <- ( x + (cos h) * ship.radius
                              , y + (sin h) * ship.radius )
                     , vel <- ( vx + (cos h) * defaultBullet.speed
                              , vy + (sin h) * defaultBullet.speed )
-                    , heading <- h }
+                    , heading <- h
+                    , id <- id }
 
 updateBullet dt bullet =
   bullet |> sapLife dt |> movePos dt
@@ -209,11 +214,12 @@ render (w, h) game =
 
 -- Game
 defaultGame : Game
-defaultGame = { state = Play
+defaultGame = { state = Start
               , ship = defaultShip
               , asteroids = []
               , bullets = []
-              , seed = Rand.newSeed 0 }
+              , seed = Rand.newSeed 0
+              , nextId = 1 }
 
 newGame numAsteroids =
   let seed = Rand.newSeed 0
@@ -221,40 +227,47 @@ newGame numAsteroids =
       (ys, seed3) = Rand.ints -halfH halfH numAsteroids seed2
 
       (asteroids, seed4) =
-        foldl (\ (x, y) (list, seed) ->
-          let (ast, seed') = newAsteroid x y seed
+        foldl (\ (x, y, id) (list, seed) ->
+          let (ast, seed') = newAsteroid id x y seed
           in  (ast::list, seed'))
-        ([], seed3) (zip (map fl xs) (map fl ys))
+        ([], seed3) (zip3 (map fl xs) (map fl ys) [1..numAsteroids])
   in
     {defaultGame | asteroids <- asteroids
-                 , seed <- seed4}
+                 , seed <- seed4
+                 , nextId <- numAsteroids + 1
+                 , state <- Play }
 
 
 
 updateGame : Input -> Game -> Game
 updateGame input game =
-  let
-      dt = input.dt
-      _ = Debug.watch "input.fire" input.fire
 
-      shipHit = any (collide game.ship) game.asteroids
-      ship = shipUpdate input game.ship
+  case game.state of
+    Start -> newGame 3
+    Play ->
+      let
+          dt = input.dt
 
-      asteroids = map (updateAsteroid dt) game.asteroids
+          shipHit = any (collide game.ship) game.asteroids
+          ship = shipUpdate input game.ship
 
-      bullets = map (updateBullet dt) game.bullets |> filter isAlive
+          asteroids = map (updateAsteroid dt) game.asteroids
 
-      bullets' = if | didFire ship -> newBullet ship :: bullets
-                    | otherwise -> bullets
+          bullets = map (updateBullet dt) game.bullets |> filter isAlive
 
+          collisions = filter (uncurry collide) <| allPairs asteroids bullets
 
-      --_ = Debug.watch "fireNow" fireNow
-      --_ = Debug.watch "ship" ship
-      --_ = Debug.watch "input" input
+          _ = Debug.log "collisions" collisions
 
-  in {game | asteroids <- asteroids
-           , ship <- ship
-           , bullets <- bullets' }
+          --hitAsteroids = Set.fromList <| map fst collisions
+          --hitBullets = Set.fromList <| map snd collisions
+
+          bullets' = if | didFire ship -> newBullet game.nextId ship :: bullets
+                        | otherwise -> bullets
+
+      in {game | asteroids <- asteroids
+               , ship <- ship
+               , bullets <- bullets' }
 
 
 
@@ -266,7 +279,7 @@ inputAll = sampleOn delta (Input <~ delta
                       {- turn -}  ~ lift (.x >> negate >> toFloat) Keyboard.arrows)
 
 
-gameState = foldp updateGame (newGame 5) inputAll
+gameState = foldp updateGame defaultGame inputAll
 
 
 main =
