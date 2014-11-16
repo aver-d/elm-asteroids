@@ -6,7 +6,7 @@ import Rand
 import Debug
 import Keyboard
 import Set
-import Util (allPairs, bigrams, roundTo)
+import Util (allPairs, bigrams, roundTo, uniqBy)
 
 
 fl = toFloat
@@ -239,49 +239,72 @@ newGame numAsteroids =
 
 
 
+notHit collided =
+  filter (\e -> not <| any (\{id} -> e.id == id) collided)
+
+updateBullets dt collided bullets =
+  bullets |> notHit collided
+          |> filter isAlive
+          |> map (updateBullet dt)
+
+
+
+colliders ents1 ents2 =
+  let
+    collisions = filter (uncurry collide) <| allPairs ents1 ents2
+    hitEnts1 = map fst collisions |> uniqBy .id
+    hitEnts2 = map snd collisions |> uniqBy .id
+  in (hitEnts1, hitEnts2)
+
+
+addBullet nextId ship bullets =
+  if | didFire ship -> (nextId + 1, newBullet nextId ship :: bullets)
+     | otherwise -> (nextId, bullets)
+
+
+
 updateGame : Input -> Game -> Game
-updateGame input game =
+updateGame ({dt} as input) game =
 
   case game.state of
     Start -> newGame 3
     Play ->
       let
-          dt = input.dt
-
           shipHit = any (collide game.ship) game.asteroids
           ship = shipUpdate input game.ship
 
-          asteroids = map (updateAsteroid dt) game.asteroids
+          (hitAsteroids, hitBullets) = colliders game.asteroids game.bullets
 
-          bullets = map (updateBullet dt) game.bullets |> filter isAlive
+          bullets = updateBullets dt hitBullets game.bullets
 
-          collisions = filter (uncurry collide) <| allPairs asteroids bullets
+          (nextId, bullets') = addBullet game.nextId ship bullets
+          --(nextId', asteroids', seed) = addAsteroids nextId game.seed hitAsteroids game.asteroids
 
-          _ = Debug.log "collisions" collisions
 
-          --hitAsteroids = Set.fromList <| map fst collisions
-          --hitBullets = Set.fromList <| map snd collisions
-
-          bullets' = if | didFire ship -> newBullet game.nextId ship :: bullets
-                        | otherwise -> bullets
-
-      in {game | asteroids <- asteroids
+      in {game | asteroids <- game.asteroids
                , ship <- ship
-               , bullets <- bullets' }
+               , bullets <- bullets'
+               , nextId <- nextId }
 
 
 
 -- Inputs
 delta = inSeconds <~ fps 60
+
+-- dropRepeats for movement?
 inputAll = sampleOn delta (Input <~ delta
-                      {- fire -}  ~ Keyboard.space
+                    {- fire   -}  ~ Keyboard.space
                     {- thrust -}  ~ lift (.y >> (==) 1 ) Keyboard.arrows
-                      {- turn -}  ~ lift (.x >> negate >> toFloat) Keyboard.arrows)
+                    {- turn   -}  ~ lift (.x >> negate >> toFloat) Keyboard.arrows)
 
 
 gameState = foldp updateGame defaultGame inputAll
 
 
 main =
-
   render <~ Window.dimensions ~ gameState
+
+
+
+
+          --_ = if not <| length collisions == 0 then let _ = Debug.log "collisions" hitAsteroids in [] else []
