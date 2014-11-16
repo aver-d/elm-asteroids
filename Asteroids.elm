@@ -62,11 +62,11 @@ wrap = screenWrapper (fl halfW, fl halfH)
 
 
 -- Asteroid
-newAsteroid : Int -> Float -> Float -> Rand.Seed -> (Asteroid, Rand.Seed)
-newAsteroid id x y seed =
+--newAsteroid : Int -> Float -> Float -> Float -> Rand.Seed -> (Asteroid, Rand.Seed)
+newAsteroid id x y parentRadius seed =
   let
     ((vx::vy::_), seed2) = Rand.ints -10 10 2 seed
-    (r, seed3)           = Rand.int 10 20 seed2
+    (r, seed3)           = Rand.int ((parentRadius//2)-4) ((parentRadius//2)+4) seed2
     radius = fl r
     (npoints, seed4)     = Rand.int 5 10 seed3
     (nums, seed5)        = Rand.floats npoints seed4
@@ -108,7 +108,6 @@ shipUpdate {dt, fire, turn, thrust} ship  =
        |> shipMove dt
        |> wrap
 
-
 shipMove dt ship =
   let vel = ship.vel `V.add` (dt `V.mul` ship.accel)
               |> V.mul ship.damping
@@ -122,7 +121,6 @@ shipMove dt ship =
 shipTurn dt turn ship =
   if | turn == 0 -> ship
      | otherwise -> {ship | heading <- ship.heading + (turn * ship.turnSpeed * dt) }
-
 
 shipThrust thrust ship =
   if | not thrust -> ship
@@ -223,12 +221,13 @@ defaultGame = { state = Start
 
 newGame numAsteroids =
   let seed = Rand.newSeed 0
+      -- put this creation stuff in a function to allow creation at later stage
       (xs, seed2) = Rand.ints -halfW halfW numAsteroids seed
       (ys, seed3) = Rand.ints -halfH halfH numAsteroids seed2
 
       (asteroids, seed4) =
         foldl (\ (x, y, id) (list, seed) ->
-          let (ast, seed') = newAsteroid id x y seed
+          let (ast, seed') = newAsteroid id x y 32 seed
           in  (ast::list, seed'))
         ([], seed3) (zip3 (map fl xs) (map fl ys) [1..numAsteroids])
   in
@@ -238,14 +237,34 @@ newGame numAsteroids =
                  , state <- Play }
 
 
+--asteroidList num =
+--  foldl (\ (x, y, id) (list, seed) ->
+--          let (ast, seed') = newAsteroid id x y 32 seed
+--          in  (ast::list, seed'))
+--        ([], seed3) (zip3 (map fl xs) (map fl ys) [1..num])
 
 notHit collided =
   filter (\e -> not <| any (\{id} -> e.id == id) collided)
 
-updateBullets dt collided bullets =
-  bullets |> notHit collided
-          |> filter isAlive
-          |> map (updateBullet dt)
+updateBullets dt collided =
+  notHit collided >> filter isAlive >> map (updateBullet dt)
+
+updateAsteroids dt collided =
+  notHit collided >> map (movePos dt >> wrap)
+
+addBullet nextId ship bullets =
+  if | didFire ship -> ((newBullet nextId ship)::bullets, nextId + 1)
+     | otherwise    -> (bullets, nextId)
+
+addAsteroids nextId seed hitAsteroids asteroids =
+  if | hitAsteroids == [] -> (asteroids, nextId, seed)
+     | otherwise ->  (asteroids, nextId, seed)
+        --let n = length hitAsteroids
+
+        --in map (\(i, a) ->
+        --          newAsteroid )
+        --      (zip [1..n] hitAsteroids)
+
 
 
 
@@ -255,11 +274,6 @@ colliders ents1 ents2 =
     hitEnts1 = map fst collisions |> uniqBy .id
     hitEnts2 = map snd collisions |> uniqBy .id
   in (hitEnts1, hitEnts2)
-
-
-addBullet nextId ship bullets =
-  if | didFire ship -> (nextId + 1, newBullet nextId ship :: bullets)
-     | otherwise -> (nextId, bullets)
 
 
 
@@ -276,12 +290,13 @@ updateGame ({dt} as input) game =
           (hitAsteroids, hitBullets) = colliders game.asteroids game.bullets
 
           bullets = updateBullets dt hitBullets game.bullets
+          (bullets', nextId) = addBullet game.nextId ship bullets
 
-          (nextId, bullets') = addBullet game.nextId ship bullets
-          --(nextId', asteroids', seed) = addAsteroids nextId game.seed hitAsteroids game.asteroids
+          asteroids = updateAsteroids dt hitAsteroids game.asteroids
+          --(asteroids', nextId', seed) = addAsteroids nextId game.seed hitAsteroids asteroids
 
 
-      in {game | asteroids <- game.asteroids
+      in {game | asteroids <- asteroids
                , ship <- ship
                , bullets <- bullets'
                , nextId <- nextId }
