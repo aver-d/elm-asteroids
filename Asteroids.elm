@@ -14,7 +14,11 @@ fl = toFloat
 debug = True
 
 type Input = { dt: Time, fire: Bool, thrust: Bool, turn: Float }
-type Asteroid = {id: Int, pos: Vec, vel: Vec, radius: Float, points: [Vec]}
+type Asteroid = { id: Int
+                , pos: Vec
+                , vel: Vec
+                , radius: Float
+                , points: [Vec]}
 type Ship = { pos: Vec
             , vel: Vec
             , accel: Vec
@@ -63,12 +67,12 @@ wrap = screenWrapper (fl halfW, fl halfH)
 
 -- Asteroid
 --newAsteroid : Int -> Float -> Float -> Float -> Rand.Seed -> (Asteroid, Rand.Seed)
-newAsteroid id x y parentRadius seed =
+newAsteroid id x y radiusEst seed =
   let
-    ((vx::vy::_), seed2) = Rand.ints -10 10 2 seed
-    (r, seed3)           = Rand.int ((parentRadius//2)-4) ((parentRadius//2)+4) seed2
-    radius = fl r
-    (npoints, seed4)     = Rand.int 5 10 seed3
+    ((vx::vy::_), seed2) = Rand.ints -30 30 2 seed
+    (r, seed3)      = Rand.int (floor(radiusEst-4)) (floor(radiusEst+4)) seed2
+    radius = toFloat r
+    (npoints, seed4)     = Rand.int 6 10 seed3
     (nums, seed5)        = Rand.floats npoints seed4
 
     angles = map (\n -> n * 2 *pi) <| map (roundTo 2) <| sort nums
@@ -123,10 +127,11 @@ shipTurn dt turn ship =
      | otherwise -> {ship | heading <- ship.heading + (turn * ship.turnSpeed * dt) }
 
 shipThrust thrust ship =
-  if | not thrust -> ship
+  if | not thrust -> { ship | thrust <- False }
      | otherwise ->
         let force = V.mul ship.thrustPower (cos ship.heading, sin ship.heading)
-        in { ship | accel <- force }
+        in { ship | accel <- force
+                  , thrust <- True }
 
 shipReload dt ship =
   { ship | firePower <- min (ship.firePower + dt) ship.fireRate }
@@ -168,10 +173,9 @@ sapLife dt ent =
 isAlive {timeToLive} = timeToLive > 0
 
 
-
-
 collide a b =
   V.len (V.sub a.pos b.pos) < (a.radius + b.radius)
+
 
 -- Render
 formAsteroid : Asteroid -> Form
@@ -190,7 +194,9 @@ formShip {pos, radius, heading, thrust} =
       r = radius
       p = path [(-r/2,r), (r,0), (-r/2,-r)]
       body = path p |> (traced (solid darkBrown))
-      booster y = rect (r/2) (r/3) |> filled red |> move (-r, y/4)
+      booster y = rect (r/2) (r/3)
+                  |> filled ( if thrust then red else charcoal )
+                  |> move (-r, y/4)
       forms = booster r :: booster -r :: body :: [] |> group
   in
     forms |> move pos |> rotate heading
@@ -198,10 +204,10 @@ formShip {pos, radius, heading, thrust} =
 render : (Int,Int) -> Game -> Element
 render (w, h) game =
 
-  let ship = formShip game.ship
+  let ship      = formShip game.ship
       asteroids = map formAsteroid game.asteroids
-      bullets = map formBullet game.bullets
-      forms = ship :: (asteroids ++ bullets)
+      bullets   = map formBullet game.bullets
+      forms     = ship :: (asteroids ++ bullets)
 
 
   in collage spaceWidth spaceHeight forms
@@ -237,11 +243,7 @@ newGame numAsteroids =
                  , state <- Play }
 
 
---asteroidList num =
---  foldl (\ (x, y, id) (list, seed) ->
---          let (ast, seed') = newAsteroid id x y 32 seed
---          in  (ast::list, seed'))
---        ([], seed3) (zip3 (map fl xs) (map fl ys) [1..num])
+
 
 notHit collided =
   filter (\e -> not <| any (\{id} -> e.id == id) collided)
@@ -257,13 +259,29 @@ addBullet nextId ship bullets =
      | otherwise    -> (bullets, nextId)
 
 addAsteroids nextId seed hitAsteroids asteroids =
-  if | hitAsteroids == [] -> (asteroids, nextId, seed)
-     | otherwise ->  (asteroids, nextId, seed)
-        --let n = length hitAsteroids
+  case hitAsteroids of
+    [] -> (asteroids, nextId, seed)
+    (parent::_) ->
+      if | parent.radius < 10 -> (asteroids, nextId, seed)
+         | otherwise ->            --todo: if parent radius less than some size, ignore
+            let (n, seed') = Rand.int 2 5 seed -- number of children
+                {pos, radius} = parent
+                --_ = Debug.log "parent" parent
+                (children, seed'') = asteroidList nextId (repeat n pos) (radius/2) seed'
 
-        --in map (\(i, a) ->
-        --          newAsteroid )
-        --      (zip [1..n] hitAsteroids)
+            in (asteroids ++ children, nextId + n, seed'')
+
+
+asteroidList startId coords radius seed =
+  foldl
+    (\((x, y), id) (list, seed') ->
+      -- todo randomize radius or pass list of radii with coords
+      let (ast, seed'') = newAsteroid id x y radius seed'
+
+
+      in  (ast::list, seed''))
+    ([], seed)
+    (zip coords [startId .. startId+(length coords)])
 
 
 
@@ -278,10 +296,10 @@ colliders ents1 ents2 =
 
 
 updateGame : Input -> Game -> Game
-updateGame ({dt} as input) game =
+updateGame ({dt} as input) ({nextId, seed} as game) =
 
   case game.state of
-    Start -> newGame 3
+    Start -> newGame 4
     Play ->
       let
           shipHit = any (collide game.ship) game.asteroids
@@ -290,16 +308,17 @@ updateGame ({dt} as input) game =
           (hitAsteroids, hitBullets) = colliders game.asteroids game.bullets
 
           bullets = updateBullets dt hitBullets game.bullets
-          (bullets', nextId) = addBullet game.nextId ship bullets
-
           asteroids = updateAsteroids dt hitAsteroids game.asteroids
-          --(asteroids', nextId', seed) = addAsteroids nextId game.seed hitAsteroids asteroids
+
+          (bullets', nextId') = addBullet nextId ship bullets
+          (asteroids', nextId'', seed') = addAsteroids nextId seed hitAsteroids asteroids
 
 
-      in {game | asteroids <- asteroids
-               , ship <- ship
+      in {game | ship <- ship
+               , asteroids <- asteroids'
                , bullets <- bullets'
-               , nextId <- nextId }
+               , nextId <- nextId''
+               , seed <- seed'}
 
 
 
