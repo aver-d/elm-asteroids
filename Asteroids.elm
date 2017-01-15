@@ -6,19 +6,24 @@ import Rand
 import Debug
 import Keyboard
 import Set
-import Util (allPairs, bigrams, roundTo, uniqBy)
+import Util (allPairs, roundTo, uniqBy)
 
 
 fl = toFloat
 
-debug = True
+debug = False
 
-type Input = { dt: Time, fire: Bool, thrust: Bool, turn: Float }
+type Input = { dt: Time
+             , fire: Bool
+             , thrust: Bool
+             , turn: Float }
+
 type Asteroid = { id: Int
                 , pos: Vec
                 , vel: Vec
                 , radius: Float
                 , points: [Vec]}
+
 type Ship = { pos: Vec
             , vel: Vec
             , accel: Vec
@@ -31,19 +36,22 @@ type Ship = { pos: Vec
             , thrust: Bool
             , firePower: Float
             , fireRate: Float }
+
 type Bullet = { id: Int
               , pos: Vec
               , vel: Vec
-              , speed: Float -- necessary?
+              , speed: Float
               , heading: Float
               , radius: Float
               , timeToLive: Float }
+
 type Game = { state: State
             , ship: Ship
             , asteroids: [Asteroid]
             , bullets: [Bullet]
             , seed: Rand.Seed
             , nextId: Int }
+
 data State = Start | Play | End
 
 
@@ -70,10 +78,10 @@ wrap = screenWrapper (fl halfW, fl halfH)
 newAsteroid id x y radiusEst seed =
   let
     ((vx::vy::_), seed2) = Rand.ints -30 30 2 seed
-    (r, seed3)      = Rand.int (floor(radiusEst-4)) (floor(radiusEst+4)) seed2
+    (r, seed3) = Rand.int (floor(radiusEst-4)) (floor(radiusEst+4)) seed2
     radius = toFloat r
-    (npoints, seed4)     = Rand.int 6 10 seed3
-    (nums, seed5)        = Rand.floats npoints seed4
+    (npoints, seed4) = Rand.int 6 10 seed3
+    (nums, seed5)  = Rand.floats npoints seed4
 
     angles = map (\n -> n * 2 *pi) <| map (roundTo 2) <| sort nums
     points = map (\a -> (cos a*radius, sin a*radius)) angles
@@ -177,10 +185,11 @@ collide a b =
   V.len (V.sub a.pos b.pos) < (a.radius + b.radius)
 
 
+
+
 -- Render
 formAsteroid : Asteroid -> Form
 formAsteroid a =
-  -- try to do debug outline with all forms
   if | not debug -> polygon a.points |> (outlined <| solid black) |> move a.pos
      | otherwise ->
         group [ polygon a.points |> (outlined <| solid black)
@@ -209,7 +218,6 @@ render (w, h) game =
       bullets   = map formBullet game.bullets
       forms     = ship :: (asteroids ++ bullets)
 
-
   in collage spaceWidth spaceHeight forms
       |> color gray
       |> container w h topLeft
@@ -227,7 +235,7 @@ defaultGame = { state = Start
 
 newGame numAsteroids =
   let seed = Rand.newSeed 0
-      -- put this creation stuff in a function to allow creation at later stage
+      -- todo: put this creation stuff in a function to allow creation at later stage
       (xs, seed2) = Rand.ints -halfW halfW numAsteroids seed
       (ys, seed3) = Rand.ints -halfH halfH numAsteroids seed2
 
@@ -262,11 +270,10 @@ addAsteroids nextId seed hitAsteroids asteroids =
   case hitAsteroids of
     [] -> (asteroids, nextId, seed)
     (parent::_) ->
-      if | parent.radius < 10 -> (asteroids, nextId, seed)
+      if | parent.radius < 12 -> (asteroids, nextId, seed)
          | otherwise ->            --todo: if parent radius less than some size, ignore
             let (n, seed') = Rand.int 2 5 seed -- number of children
                 {pos, radius} = parent
-                --_ = Debug.log "parent" parent
                 (children, seed'') = asteroidList nextId (repeat n pos) (radius/2) seed'
 
             in (asteroids ++ children, nextId + n, seed'')
@@ -275,14 +282,12 @@ addAsteroids nextId seed hitAsteroids asteroids =
 asteroidList startId coords radius seed =
   foldl
     (\((x, y), id) (list, seed') ->
-      -- todo randomize radius or pass list of radii with coords
+      -- todo: randomize radius or pass list of radii with coords
       let (ast, seed'') = newAsteroid id x y radius seed'
-
-
       in  (ast::list, seed''))
+
     ([], seed)
     (zip coords [startId .. startId+(length coords)])
-
 
 
 
@@ -325,7 +330,6 @@ updateGame ({dt} as input) ({nextId, seed} as game) =
 -- Inputs
 delta = inSeconds <~ fps 60
 
--- dropRepeats for movement?
 inputAll = sampleOn delta (Input <~ delta
                     {- fire   -}  ~ Keyboard.space
                     {- thrust -}  ~ lift (.y >> (==) 1 ) Keyboard.arrows
@@ -338,7 +342,3 @@ gameState = foldp updateGame defaultGame inputAll
 main =
   render <~ Window.dimensions ~ gameState
 
-
-
-
-          --_ = if not <| length collisions == 0 then let _ = Debug.log "collisions" hitAsteroids in [] else []
