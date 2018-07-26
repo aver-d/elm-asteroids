@@ -2,7 +2,7 @@
 
 This is a simple version of Asteroids written in Elm 0.13.
 
-I wrote this in late 2014 while experimenting with Elm. I've written Asteroids in several languages, but the Elm version is pretty – the code that is, not the game, of course.
+I wrote this in late 2014 while experimenting with Elm. I've written Asteroids in several languages, but the Elm version is pretty – the Elm code, that is, not this game's appearance, of course.
 
 Please note my Elm 0.13 compiler is long gone, so hopefully my quick tidy of the code today has not resulted in any minor syntax errors, but any should be easy to tweak. I provide the code here as a reference for myself and anyone who might be interested. I don't plan to update the program to the latest version of Elm.
 
